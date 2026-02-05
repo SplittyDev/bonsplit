@@ -25,6 +25,12 @@ enum DropZone: Equatable {
     }
 }
 
+/// Drop lifecycle state to prevent dropUpdated from re-setting state after performDrop
+enum PaneDropLifecycle {
+    case idle
+    case hovering
+}
+
 /// Container for a single pane with its tab bar and content area
 struct PaneContainerView<Content: View, EmptyContent: View>: View {
     @Bindable var pane: PaneState
@@ -35,6 +41,7 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
     var contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch
 
     @State private var activeDropZone: DropZone?
+    @State private var dropLifecycle: PaneDropLifecycle = .idle
 
     private var isFocused: Bool {
         controller.focusedPaneId == pane.id
@@ -53,6 +60,13 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
             contentAreaWithDropZones
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Clear drop state when drag ends elsewhere (cancelled, dropped in another pane, etc.)
+        .onChange(of: controller.draggingTab) { _, newValue in
+            if newValue == nil {
+                activeDropZone = nil
+                dropLifecycle = .idle
+            }
+        }
     }
 
     // MARK: - Content Area with Drop Zones
@@ -124,7 +138,8 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
                 size: size,
                 pane: pane,
                 controller: controller,
-                activeDropZone: $activeDropZone
+                activeDropZone: $activeDropZone,
+                dropLifecycle: $dropLifecycle
             ))
     }
 
@@ -180,6 +195,7 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     let pane: PaneState
     let controller: SplitViewController
     @Binding var activeDropZone: DropZone?
+    @Binding var dropLifecycle: PaneDropLifecycle
 
     // Calculate zone based on position within the view
     private func zoneForLocation(_ location: CGPoint) -> DropZone {
@@ -206,6 +222,8 @@ struct UnifiedPaneDropDelegate: DropDelegate {
 
         // Clear visual state immediately to prevent lingering blue indicator.
         // Must happen synchronously before returning, not in async callback.
+        // Setting dropLifecycle to idle prevents dropUpdated from re-setting activeDropZone.
+        dropLifecycle = .idle
         activeDropZone = nil
         controller.draggingTab = nil
         controller.dragSourcePaneId = nil
@@ -270,14 +288,20 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
+        dropLifecycle = .hovering
         activeDropZone = zoneForLocation(info.location)
     }
 
     func dropExited(info: DropInfo) {
+        dropLifecycle = .idle
         activeDropZone = nil
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        // Guard against dropUpdated firing after performDrop/dropExited
+        guard dropLifecycle == .hovering else {
+            return DropProposal(operation: .move)
+        }
         activeDropZone = zoneForLocation(info.location)
         return DropProposal(operation: .move)
     }

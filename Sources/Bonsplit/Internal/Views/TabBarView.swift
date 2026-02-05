@@ -11,6 +11,7 @@ struct TabBarView: View {
     var showSplitButtons: Bool = true
 
     @State private var dropTargetIndex: Int?
+    @State private var dropLifecycle: TabDropLifecycle = .idle
     @State private var scrollOffset: CGFloat = 0
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
@@ -92,6 +93,13 @@ struct TabBarView: View {
         .contentShape(Rectangle())
         .background(tabBarBackground)
         .saturation(shouldShowFullSaturation ? 1.0 : 0)
+        // Clear drop state when drag ends elsewhere (cancelled, dropped in another pane, etc.)
+        .onChange(of: splitViewController.draggingTab) { _, newValue in
+            if newValue == nil {
+                dropTargetIndex = nil
+                dropLifecycle = .idle
+            }
+        }
     }
 
     // MARK: - Tab Item
@@ -122,7 +130,8 @@ struct TabBarView: View {
             targetIndex: index,
             pane: pane,
             controller: splitViewController,
-            dropTargetIndex: $dropTargetIndex
+            dropTargetIndex: $dropTargetIndex,
+            dropLifecycle: $dropLifecycle
         ))
         .overlay(alignment: .leading) {
             if dropTargetIndex == index {
@@ -134,6 +143,11 @@ struct TabBarView: View {
     // MARK: - Item Provider
 
     private func createItemProvider(for tab: TabItem) -> NSItemProvider {
+        
+        // Clear any stale drop indicator from previous incomplete drag
+        dropTargetIndex = nil
+        dropLifecycle = .idle
+        
         // Set drag source for visual feedback
         splitViewController.draggingTab = tab
         splitViewController.dragSourcePaneId = pane.id
@@ -158,7 +172,8 @@ struct TabBarView: View {
                 targetIndex: pane.tabs.count,
                 pane: pane,
                 controller: splitViewController,
-                dropTargetIndex: $dropTargetIndex
+                dropTargetIndex: $dropTargetIndex,
+                dropLifecycle: $dropLifecycle
             ))
             .overlay(alignment: .leading) {
                 if dropTargetIndex == pane.tabs.count {
@@ -253,6 +268,12 @@ struct TabBarView: View {
     }
 }
 
+/// Drop lifecycle state to prevent dropUpdated from re-setting state after performDrop
+enum TabDropLifecycle {
+    case idle
+    case hovering
+}
+
 // MARK: - Tab Drop Delegate
 
 struct TabDropDelegate: DropDelegate {
@@ -260,8 +281,14 @@ struct TabDropDelegate: DropDelegate {
     let pane: PaneState
     let controller: SplitViewController
     @Binding var dropTargetIndex: Int?
+    @Binding var dropLifecycle: TabDropLifecycle
 
     func performDrop(info: DropInfo) -> Bool {
+
+        // Clear visual state immediately to prevent lingering indicators.
+        // Must happen synchronously before returning, not in async callback.
+        // Setting dropLifecycle to idle prevents dropUpdated from re-setting dropTargetIndex.
+        dropLifecycle = .idle
         dropTargetIndex = nil
         controller.draggingTab = nil
         controller.dragSourcePaneId = nil
@@ -318,17 +345,28 @@ struct TabDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
+        dropLifecycle = .hovering
         dropTargetIndex = targetIndex
     }
 
     func dropExited(info: DropInfo) {
+        dropLifecycle = .idle
         if dropTargetIndex == targetIndex {
             dropTargetIndex = nil
         }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        // Guard against dropUpdated firing after performDrop/dropExited
+        // This is the key fix for the lingering indicator bug
+        guard dropLifecycle == .hovering else {
+            return DropProposal(operation: .move)
+        }
+        // Only update if this is the active target
+        if dropTargetIndex != targetIndex {
+            dropTargetIndex = targetIndex
+        }
+        return DropProposal(operation: .move)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
