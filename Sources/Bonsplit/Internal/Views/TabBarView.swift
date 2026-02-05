@@ -263,19 +263,20 @@ struct TabDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         dropTargetIndex = nil
+        controller.draggingTab = nil
+        controller.dragSourcePaneId = nil
 
         guard let provider = info.itemProviders(for: [.text]).first else {
+            
             // Clear drag state
             controller.draggingTab = nil
             controller.dragSourcePaneId = nil
+            
             return false
         }
 
         provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
             DispatchQueue.main.async {
-                // Clear drag state
-                controller.draggingTab = nil
-                controller.dragSourcePaneId = nil
 
                 // Handle both Data and String representations
                 let string: String?
