@@ -3,6 +3,8 @@ import AppKit
 
 /// SwiftUI wrapper around NSSplitView for native split behavior
 struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentable {
+    @Environment(SplitViewController.self) private var splitController
+    
     @Bindable var splitState: SplitState
     let controller: SplitViewController
     let contentBuilder: (TabItem, PaneID) -> Content
@@ -67,11 +69,11 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 splitState.dividerPosition = 0.5
 
                 // Wait for layout
-                DispatchQueue.main.async {
+                Task {
                     // Show the new pane and animate
                     splitView.arrangedSubviews[newPaneIndex].isHidden = false
 
-                    SplitAnimator.shared.animate(
+                    splitController.animator.animate(
                         splitView: splitView,
                         from: startPosition,
                         to: targetPosition

@@ -28,6 +28,8 @@ final class SplitViewController {
 
     /// Callback for geometry changes
     var onGeometryChange: (() -> Void)?
+    
+    var animator: SplitAnimator = SplitAnimator()
 
     init(rootNode: SplitNode? = nil) {
         if let rootNode {
